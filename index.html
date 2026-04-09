@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>ChatApp</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="login-screen">
+  <div id="login-box">
+    <div class="login-logo">💬</div>
+    <h2>ChatApp</h2>
+    <p>Pick an avatar and enter your name</p>
+    <div class="av-row">
+      <span class="av-opt selected" onclick="pickAv(this)">😊</span>
+      <span class="av-opt" onclick="pickAv(this)">😎</span>
+      <span class="av-opt" onclick="pickAv(this)">🧑</span>
+      <span class="av-opt" onclick="pickAv(this)">👩</span>
+      <span class="av-opt" onclick="pickAv(this)">🧔</span>
+      <span class="av-opt" onclick="pickAv(this)">👦</span>
+      <span class="av-opt" onclick="pickAv(this)">🦸</span>
+      <span class="av-opt" onclick="pickAv(this)">🧕</span>
+    </div>
+    <input type="text" id="username-input" placeholder="Your name..." maxlength="20" autocomplete="off">
+    <button onclick="joinChat()">Join Chat ➤</button>
+  </div>
+</div>
+
+<!-- CHAT SCREEN -->
+<div id="chat-screen">
+
+  <!-- HEADER -->
+  <div id="header">
+    <div class="header-av" id="header-av">💬</div>
+    <div class="header-info">
+      <h3>ChatApp</h3>
+      <p id="online-count">0 online</p>
+    </div>
+    <div class="header-icons">
+      <span title="Members" onclick="toggleMembers()">👥</span>
+    </div>
+  </div>
+
+  <!-- MEMBERS PANEL (hidden by default) -->
+  <div id="members-panel">
+    <div id="members-list"></div>
+  </div>
+
+  <!-- MESSAGES -->
+  <div id="messages"></div>
+
+  <!-- TYPING -->
+  <div id="typing-indicator"></div>
+
+  <!-- EMOJI PICKER -->
+  <div id="emoji-picker"></div>
+
+  <!-- INPUT -->
+  <div id="input-bar">
+    <span id="emoji-btn" onclick="toggleEmoji()">😊</span>
+    <input type="text" id="msg-input" placeholder="Type a message..." autocomplete="off">
+    <button id="send-btn" onclick="sendMessage()">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="white"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    </button>
+  </div>
+
+</div>
+
+<script>
+  const socket = io();
+  let myUsername = '';
+  let myAvatar = '😊';
+  let typingTimer;
+  let membersVisible = false;
+  let onlineUsers = [];
+
+  const EMOJIS = ['😊','😂','❤️','👍','😍','🔥','😭','😘','🥰','😁','😎','🤩','😅','🥳','🤔','😴','🥺','😡','😱','🎉','👏','💪','🙏','✅','💯','🚀','⭐','🌟','👋','🫡'];
+
+  function pickAv(el) {
+    document.querySelectorAll('.av-opt').forEach(e => e.classList.remove('selected'));
+    el.classList.add('selected');
+    myAvatar = el.textContent;
+  }
+
+  function joinChat() {
+    const input = document.getElementById('username-input');
+    const name = input.value.trim();
+    if (!name) { alert('Please enter your name'); return; }
+    myUsername = name;
+    socket.emit('set_username', { username: name, avatar: myAvatar });
+  }
+
+  socket.on('username_set', () => {
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('chat-screen').style.display = 'flex';
+    document.getElementById('header-av').textContent = myAvatar;
+    buildEmojiPicker();
+  });
+
+  socket.on('chat_history', (data) => {
+    data.messages.forEach(msg => addMessage(msg, msg.username === myUsername));
+  });
+
+  socket.on('receive_message', (data) => {
+    addMessage(data, data.username === myUsername);
+  });
+
+  socket.on('user_joined', (data) => {
+    onlineUsers = data.online_users;
+    addSystemMsg('👋 ' + data.username + ' joined');
+    updateOnline(onlineUsers);
+  });
+
+  socket.on('user_left', (data) => {
+    onlineUsers = data.online_users;
+    addSystemMsg('👋 ' + data.username + ' left');
+    updateOnline(onlineUsers);
+  });
+
+  socket.on('user_typing', (data) => {
+    document.getElementById('typing-indicator').innerHTML =
+      '<span class="typing-text">' + data.username + ' is typing<span class="dots"><span>.</span><span>.</span><span>.</span></span></span>';
+  });
+
+  socket.on('user_stop_typing', () => {
+    document.getElementById('typing-indicator').innerHTML = '';
+  });
+
+  function sendMessage() {
+    const input = document.getElementById('msg-input');
+    const msg = input.value.trim();
+    if (!msg) return;
+    socket.emit('send_message', { message: msg });
+    socket.emit('stop_typing');
+    input.value = '';
+  }
+
+  function addMessage(data, isMe) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-wrap ' + (isMe ? 'me' : 'other');
+
+    if (!isMe) {
+      const avEl = document.createElement('div');
+      avEl.className = 'msg-av';
+      avEl.textContent = data.avatar || '😊';
+      wrap.appendChild(avEl);
+    }
+
+    const inner = document.createElement('div');
+    inner.className = 'msg-inner';
+
+    if (!isMe) {
+      const nameEl = document.createElement('div');
+      nameEl.className = 'msg-name';
+      nameEl.textContent = data.username;
+      inner.appendChild(nameEl);
+    }
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = data.message;
+
+    const meta = document.createElement('div');
+    meta.className = 'msg-meta';
+    meta.innerHTML = data.time + (isMe ? ' <span class="tick">✓✓</span>' : '');
+
+    bubble.appendChild(meta);
+    inner.appendChild(bubble);
+    wrap.appendChild(inner);
+
+    document.getElementById('messages').appendChild(wrap);
+    scrollBottom();
+  }
+
+  function addSystemMsg(text) {
+    const el = document.createElement('div');
+    el.className = 'system-msg';
+    el.textContent = text;
+    document.getElementById('messages').appendChild(el);
+    scrollBottom();
+  }
+
+  function updateOnline(users) {
+    document.getElementById('online-count').textContent = users.length + ' online';
+    const ml = document.getElementById('members-list');
+    ml.innerHTML = '<div style="font-size:13px;font-weight:600;color:#128c7e;padding:8px 12px;border-bottom:0.5px solid #eee;">Online Members</div>';
+    users.forEach(u => {
+      const d = document.createElement('div');
+      d.className = 'member-item';
+      d.innerHTML = '<span style="font-size:20px">' + (u.avatar||'😊') + '</span><span>' + u.name + '</span><span class="online-dot"></span>';
+      ml.appendChild(d);
+    });
+  }
+
+  function toggleMembers() {
+    membersVisible = !membersVisible;
+    document.getElementById('members-panel').style.display = membersVisible ? 'block' : 'none';
+  }
+
+  function scrollBottom() {
+    const msgs = document.getElementById('messages');
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  document.getElementById('msg-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { sendMessage(); return; }
+    socket.emit('typing');
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => socket.emit('stop_typing'), 1500);
+  });
+
+  document.getElementById('username-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') joinChat();
+  });
+
+  function toggleEmoji() {
+    const p = document.getElementById('emoji-picker');
+    p.style.display = p.style.display === 'flex' ? 'none' : 'flex';
+  }
+
+  function buildEmojiPicker() {
+    const p = document.getElementById('emoji-picker');
+    EMOJIS.forEach(em => {
+      const s = document.createElement('span');
+      s.textContent = em;
+      s.onclick = () => {
+        const inp = document.getElementById('msg-input');
+        inp.value += em;
+        inp.focus();
+        toggleEmoji();
+      };
+      p.appendChild(s);
+    });
+  }
+</script>
+</body>
+</html>
